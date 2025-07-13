@@ -100,19 +100,19 @@ def get_ans_criteria_message(imc):
 def get_pathways_message():
     """Retorna mensagem sobre caminhos para cirurgia"""
     return """
-🏥 **Caminhos para cirurgia bariátrica:**
+🏥 *Caminhos para cirurgia bariátrica:*
 
-**🔹 Particular:**
+*🔹 Particular:*
 - Mais rápido
 - Escolha livre do cirurgião
 - Custo: R$ 15.000 a R$ 50.000
 
-**🔹 Plano de Saúde:**
+*🔹 Plano de Saúde:*
 - Cobertura obrigatória pela ANS
 - Período de carência: 24 meses
 - Necessária avaliação multidisciplinar
 
-**🔹 SUS:**
+*🔹 SUS:*
 - Gratuito
 - Fila de espera mais longa
 - Disponível em centros especializados
@@ -215,14 +215,14 @@ def handle_relationship_input(message, user_data):
     
     message_text = f"""Obrigada pela informação, {user_data.name}! 
 
-💙 **Orientações importantes sobre apoio:**
+💙 *Orientações importantes sobre apoio:*
 
 • As orientações médicas devem sempre ser direcionadas pelos profissionais habilitados
 • A decisão será sempre da pessoa interessada na cirurgia
 • Não é ético nem humano forçar ou indicar de forma incisiva qualquer modificação corporal ou procedimentos cirúrgicos a outra pessoa
 • Seu papel é oferecer apoio emocional e acompanhar nas consultas, se solicitado
 
-**Informações gerais sobre documentos necessários:**
+*Informações gerais sobre documentos necessários:*
 - RG e CPF
 - Cartão do SUS ou plano de saúde
 - Comprovante de residência
@@ -312,19 +312,19 @@ def send_complete_report(message, user_data):
     
     report = f"""Perfeito, {user_data.name}! Aqui está {article} sua análise completa:
 
-📊 **Seus dados:**
+📊 *Seus dados:*
 • Nome: {user_data.name}
 • Idade: {user_data.age} anos
 • Altura: {user_data.height} cm
 • Peso: {user_data.weight} kg
 
-🔢 **IMC:** {imc} ({classification})
+🔢 *IMC:* {imc} ({classification})
 
 {ans_criteria}
 
 {pathways}
 
-💡 **Próximos passos:**
+💡 *Próximos passos:*
 1. Consulte um cirurgião bariátrico qualificado
 2. Realize avaliação multidisciplinar
 3. Faça exames pré-operatórios
