@@ -28,17 +28,19 @@ app = Flask(__name__)
 # Estados do usuário
 class UserState:
     INITIAL = "initial"
+    WAITING_CONSENT = "waiting_consent"
     WAITING_NAME = "waiting_name"
+    WAITING_PATIENT_CONFIRMATION = "waiting_patient_confirmation"
+    WAITING_RELATIONSHIP = "waiting_relationship"
     WAITING_AGE = "waiting_age"
     WAITING_GENDER = "waiting_gender"
     WAITING_HEIGHT = "waiting_height"
     WAITING_WEIGHT = "waiting_weight"
-    WAITING_PATIENT_CONFIRMATION = "waiting_patient_confirmation"
-    WAITING_RELATIONSHIP = "waiting_relationship"
     COMPLETED = "completed"
+    HELPER_COMPLETED = "helper_completed"
     GENERAL_CHAT = "general_chat"
 
-# Armazenamento de dados do usuário (em produção, use um banco de dados)
+# Armazenamento de dados do usuário
 user_sessions = {}
 
 class UserData:
@@ -78,7 +80,7 @@ def cleanup_old_sessions():
         logger.info(f"Cleaned up session for user {user_id}")
 
 def calculate_imc(weight, height):
-    """Calcula o IMC com validação melhorada"""
+    """Calcula o IMC com validação"""
     try:
         weight_kg = float(weight)
         height_m = float(height) / 100
@@ -92,7 +94,7 @@ def calculate_imc(weight, height):
         return None
 
 def get_imc_classification(imc):
-    """Classifica o IMC com mais detalhes"""
+    """Classifica o IMC"""
     if imc < 18.5:
         return "Baixo peso", "⚠️"
     elif imc < 25:
@@ -104,204 +106,90 @@ def get_imc_classification(imc):
     elif imc < 40:
         return "Obesidade grau II", "🔸"
     else:
-        return "Obesidade grau III (obesidade mórbida)", "🔴"
+        return "Obesidade grau III", "🔴"
 
 def get_ans_criteria_message(imc):
-    """Retorna mensagem detalhada sobre critérios da ANS"""
+    """Retorna mensagem sobre critérios da ANS"""
     if imc >= 40:
-        return """✅ **Você atende aos critérios da ANS para cirurgia bariátrica:**
-• IMC ≥ 40 kg/m²
-• Indicação para cirurgia bariátrica"""
+        return """✅ **Pelo seu IMC, você atende aos critérios da ANS para cirurgia bariátrica:**
+• IMC ≥ 40 kg/m²"""
     elif imc >= 35:
         return """⚠️ **Você pode atender aos critérios da ANS se tiver comorbidades:**
 • IMC entre 35-39,9 kg/m²
-• Necessárias comorbidades como: diabetes, hipertensão, apneia do sono, artrose, etc.
-• Avaliação médica necessária"""
+• É necessário ter comorbidades como diabetes, hipertensão, apneia do sono, etc.
+• Será preciso avaliação médica para confirmar"""
     else:
         return """❌ **Pelo IMC atual, você não atende aos critérios básicos da ANS:**
 • IMC < 35 kg/m²
-• Considere acompanhamento nutricional e exercícios
-• Reavalie em consulta médica"""
+• Converse com um médico sobre outras opções"""
 
 def get_pathways_message():
-    """Retorna informações detalhadas sobre caminhos"""
+    """Retorna informações sobre caminhos - SEM VALORES"""
     return """🏥 **Caminhos para cirurgia bariátrica:**
 
 🔹 **Particular:**
-• Mais rápido (1-3 meses)
-• Escolha livre do cirurgião
-• Custo: R$ 15.000 a R$ 50.000
-• Sem burocracia
+• Consulte diretamente com cirurgiões especializados
+• Para informações sobre custos, consulte profissionais habilitados
 
 🔹 **Plano de Saúde:**
 • Cobertura obrigatória pela ANS
 • Período de carência: 24 meses
-• Avaliação multidisciplinar obrigatória
-• Tempo médio: 6-12 meses
+• Consulte seu plano para prazos específicos
 
 🔹 **SUS:**
 • Totalmente gratuito
-• Fila de espera: 1-3 anos
-• Centros especializados (poucos)
-• Avaliação rigorosa
+• Consulte unidades de saúde para informações sobre fila de espera
 
 📋 **Documentos necessários:**
 • RG, CPF, comprovante de residência
 • Cartão do SUS ou plano de saúde
-• Histórico médico de tentativas de emagrecimento"""
+• Histórico médico"""
 
-# Melhor sistema de respostas automáticas
-class ResponseEngine:
-    def __init__(self):
-        self.responses = {
-            'dieta': {
-                'keywords': ['dieta', 'alimentação', 'comer', 'comida', 'nutrição', 'cardápio', 'regime'],
-                'response': """🥗 **Sobre alimentação pré e pós-cirúrgica:**
-
-**Pré-operatório:**
-• Dieta líquida 1-2 semanas antes
-• Redução de carboidratos
-• Aumento de proteínas
-• Hidratação adequada
-
-**Pós-operatório:**
-• Fase 1: Líquidos (1-2 semanas)
-• Fase 2: Pastosos (2-4 semanas)
-• Fase 3: Sólidos macios (4-8 semanas)
-• Fase 4: Alimentação normal (após 2 meses)
-
-⚠️ **Importante:** Sempre siga as orientações do seu nutricionista!"""
-            },
-            'tecnicas': {
-                'keywords': ['técnica', 'bypass', 'sleeve', 'banda', 'cirurgia', 'operação', 'procedimento'],
-                'response': """🔬 **Principais técnicas cirúrgicas:**
-
-**Sleeve (Manga Gástrica):**
-• Remove 80% do estômago
-• Mais simples e rápida
-• Menor risco de complicações
-
-**Bypass Gástrico:**
-• Reduz estômago + desvia intestino
-• Maior perda de peso
-• Mais complexa
-
-**Banda Gástrica:**
-• Anel ajustável no estômago
-• Reversível
-• Menos eficaz a longo prazo
-
-👨‍⚕️ **A escolha da técnica depende de:**
-• Seu IMC e comorbidades
-• Histórico médico
-• Preferência do cirurgião
-• Avaliação individual"""
-            },
-            'recuperacao': {
-                'keywords': ['recuperação', 'pós-operatório', 'depois', 'cicatrização', 'volta', 'trabalho'],
-                'response': """🏥 **Recuperação pós-cirúrgica:**
-
-**Primeiros dias:**
-• Internação: 1-3 dias
-• Repouso absoluto
-• Dieta líquida
-• Medicação para dor
-
-**Primeira semana:**
-• Repouso relativo
-• Caminhadas leves
-• Curativos diários
-• Acompanhamento médico
-
-**Primeiro mês:**
-• Volta gradual às atividades
-• Exercícios leves
-• Dieta pastosa
-• Consultas semanais
-
-**Após 2 meses:**
-• Volta ao trabalho (se escritório)
-• Exercícios moderados
-• Alimentação normal
-• Acompanhamento mensal
-
-⚠️ **Complicações possíveis:**
-• Náuseas e vômitos
-• Dumping syndrome
-• Deficiências nutricionais
-• Necessidade de suplementação"""
-            },
-            'custos': {
-                'keywords': ['custo', 'preço', 'valor', 'quanto custa', 'dinheiro', 'pagar'],
-                'response': """💰 **Custos da cirurgia bariátrica:**
-
-**Cirurgia Particular:**
-• Sleeve: R$ 15.000 - R$ 25.000
-• Bypass: R$ 20.000 - R$ 35.000
-• Banda: R$ 12.000 - R$ 20.000
-
-**Custos adicionais:**
-• Exames pré-operatórios: R$ 2.000 - R$ 5.000
-• Internação: R$ 3.000 - R$ 8.000
-• Acompanhamento: R$ 2.000 - R$ 5.000/ano
-
-**Formas de pagamento:**
-• À vista (desconto 10-20%)
-• Parcelado (até 24x)
-• Financiamento médico
-• Consórcio
-
-💡 **Dica:** Compare preços e busque referências do cirurgião!"""
-            },
-            'tempo': {
-                'keywords': ['tempo', 'quanto demora', 'duração', 'prazo', 'espera'],
-                'response': """⏰ **Tempo para cirurgia bariátrica:**
-
-**Particular:**
-• Consulta inicial → Cirurgia: 1-3 meses
-• Depende dos exames e preparação
-
-**Plano de Saúde:**
-• Após carência: 6-12 meses
-• Avaliação multidisciplinar obrigatória
-• Pode haver recursos e negativas
-
-**SUS:**
-• Fila de espera: 1-3 anos
-• Varia muito por região
-• Poucos centros especializados
-
-**Duração da cirurgia:**
-• Sleeve: 1-2 horas
-• Bypass: 2-3 horas
-• Laparoscópica (preferível)
-
-⏱️ **Prepare-se:** Use o tempo de espera para mudanças de hábitos!"""
-            }
-        }
+def is_restricted_question(text):
+    """Verifica se a pergunta contém temas restritos"""
+    restricted_keywords = [
+        # Valores e custos
+        'valor', 'preço', 'custo', 'quanto custa', 'preço da cirurgia',
+        'quanto paga', 'valor da operação', 'preço do procedimento',
+        
+        # Tempos específicos de cirurgia
+        'tempo de cirurgia', 'duração da cirurgia', 'quantas horas',
+        'tempo de operação', 'duração do procedimento',
+        
+        # Métodos cirúrgicos específicos
+        'laparoscopia', 'laparoscópica', 'método cirúrgico',
+        'como é feita', 'como fazem', 'procedimento cirúrgico',
+        'técnica cirúrgica', 'como operam', 'cortes', 'incisões'
+    ]
     
-    def get_response(self, text, user_name=""):
-        text_lower = text.lower()
-        
-        for category, data in self.responses.items():
-            if any(keyword in text_lower for keyword in data['keywords']):
-                return data['response']
-        
-        # Resposta padrão mais inteligente
-        return f"""💙 Oi{f', {user_name}' if user_name else ''}! 
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in restricted_keywords)
 
-Estou aqui para ajudar com dúvidas sobre cirurgia bariátrica. Posso falar sobre:
+def get_restriction_message():
+    """Retorna mensagem padrão para temas restritos"""
+    return """⚠️ **Informação restrita**
 
-• 🥗 **Dieta** (pré e pós-operatório)
-• 🔬 **Técnicas** cirúrgicas 
-• 🏥 **Recuperação** e cuidados
-• 💰 **Custos** e formas de pagamento
-• ⏰ **Tempo** de espera
-• 📋 **Documentos** necessários
+Para informações sobre valores, tempos de cirurgia e métodos cirúrgicos específicos, você deve consultar diretamente com:
 
-Sobre o que você gostaria de saber mais?"""
+• Cirurgiões especializados
+• Hospitais credenciados
+• Seu plano de saúde
+• Unidades do SUS
 
-response_engine = ResponseEngine()
+Posso ajudar com outras dúvidas sobre critérios da ANS e documentação necessária! 💙"""
+
+def get_gender_neutral_message(name):
+    """Retorna mensagem sem gênero específico"""
+    return f"Obrigada, {name}! 😊"
+
+def get_gendered_message(name, gender):
+    """Retorna mensagem com gênero apropriado"""
+    if gender == "outro":
+        return f"Obrigada, {name}! 😊"
+    elif gender == "feminino":
+        return f"Obrigada, {name}! 😊"
+    else:  # masculino
+        return f"Obrigado, {name}! 😊"
 
 # Configuração Flask
 @app.route('/')
@@ -328,39 +216,19 @@ def webhook():
 def health():
     return {"status": "healthy", "timestamp": time.time()}
 
-# Handlers melhorados
+# Handlers
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     user_data.state = UserState.INITIAL
     
-    # Limpar sessões antigas
     cleanup_old_sessions()
     
-    username = message.from_user.first_name or "amigo(a)"
+    response = """Olá! 👋 Eu sou a BarIA, sua assistente virtual focada em cirurgia bariátrica no Brasil. Posso te fazer algumas perguntinhas para entender melhor sua situação e te ajudar nessa jornada?"""
     
-    response = f"""Olá, {username}! 👋 
-
-Eu sou a **BarIA**, sua assistente virtual especializada em cirurgia bariátrica no Brasil.
-
-Posso te ajudar com:
-• Cálculo de IMC e análise
-• Critérios da ANS
-• Caminhos para cirurgia
-• Dúvidas sobre procedimentos
-• Orientações gerais
-
-Como posso te ajudar hoje?"""
-    
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("📊 Fazer avaliação completa", callback_data="start_questions"),
-        InlineKeyboardButton("💬 Só quero conversar", callback_data="general_chat"),
-        InlineKeyboardButton("📋 Ver comandos", callback_data="help")
-    )
-    
-    bot.send_message(message.chat.id, response, reply_markup=keyboard, parse_mode='Markdown')
+    set_user_state(user_id, UserState.WAITING_CONSENT)
+    bot.send_message(message.chat.id, response)
 
 @bot.message_handler(commands=['help'])
 def handle_help(message):
@@ -370,17 +238,9 @@ def handle_help(message):
 • `/help` - Ver esta ajuda
 • `/reset` - Recomeçar avaliação
 
-**Posso falar sobre:**
-• Dieta pré e pós-operatório
-• Técnicas cirúrgicas
-• Recuperação e cuidados
-• Custos e formas de pagamento
-• Tempo de espera
-• Critérios da ANS
-
-Digite qualquer dúvida que eu respondo! 💙"""
+Digite /start para começar! 💙"""
     
-    bot.send_message(message.chat.id, help_text, parse_mode='Markdown')
+    bot.send_message(message.chat.id, help_text)
 
 @bot.message_handler(commands=['reset'])
 def handle_reset(message):
@@ -388,35 +248,6 @@ def handle_reset(message):
     if user_id in user_sessions:
         del user_sessions[user_id]
     bot.send_message(message.chat.id, "✅ Dados resetados! Digite /start para começar novamente.")
-
-# Callback handlers
-@bot.callback_query_handler(func=lambda call: call.data == "start_questions")
-def start_questions(call):
-    user_id = call.from_user.id
-    set_user_state(user_id, UserState.WAITING_NAME)
-    
-    bot.edit_message_text(
-        "📝 **Vamos começar sua avaliação!**\n\n1️⃣ Qual é o seu primeiro nome?",
-        call.message.chat.id,
-        call.message.message_id,
-        parse_mode='Markdown'
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data == "general_chat")
-def general_chat(call):
-    user_id = call.from_user.id
-    set_user_state(user_id, UserState.GENERAL_CHAT)
-    
-    bot.edit_message_text(
-        "💬 **Perfeito!** Estou aqui para tirar suas dúvidas sobre cirurgia bariátrica.\n\nPode me perguntar qualquer coisa! 💙",
-        call.message.chat.id,
-        call.message.message_id,
-        parse_mode='Markdown'
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data == "help")
-def help_callback(call):
-    handle_help(call.message)
 
 # Handler principal de mensagens
 @bot.message_handler(func=lambda message: True)
@@ -426,8 +257,12 @@ def handle_text_message(message):
         user_data = get_user_data(user_id)
         text = message.text.strip()
         
-        # Log da mensagem
         logger.info(f"User {user_id} ({user_data.state}): {text}")
+        
+        # Verificar se é uma pergunta restrita
+        if is_restricted_question(text):
+            bot.reply_to(message, get_restriction_message())
+            return
         
         # Saudações iniciais
         if text.lower() in ['olá', 'oi', 'hello', 'hey', 'bom dia', 'boa tarde', 'boa noite']:
@@ -435,8 +270,10 @@ def handle_text_message(message):
                 handle_start(message)
                 return
         
-        # Fluxo de coleta de dados
-        if user_data.state == UserState.WAITING_NAME:
+        # Fluxo sequencial obrigatório
+        if user_data.state == UserState.WAITING_CONSENT:
+            handle_consent(message, user_data)
+        elif user_data.state == UserState.WAITING_NAME:
             handle_name_input(message, user_data)
         elif user_data.state == UserState.WAITING_PATIENT_CONFIRMATION:
             handle_patient_confirmation(message, user_data)
@@ -450,7 +287,7 @@ def handle_text_message(message):
             handle_height_input(message, user_data)
         elif user_data.state == UserState.WAITING_WEIGHT:
             handle_weight_input(message, user_data)
-        elif user_data.state == UserState.GENERAL_CHAT or user_data.state == UserState.COMPLETED:
+        elif user_data.state in [UserState.COMPLETED, UserState.HELPER_COMPLETED, UserState.GENERAL_CHAT]:
             handle_general_question(message, user_data)
         else:
             bot.reply_to(message, "❌ Algo deu errado. Digite /start para começar novamente.")
@@ -459,109 +296,106 @@ def handle_text_message(message):
         logger.error(f"Error handling message: {e}")
         bot.reply_to(message, "❌ Ocorreu um erro. Tente novamente ou digite /start.")
 
+def handle_consent(message, user_data):
+    text = message.text.lower().strip()
+    
+    if any(word in text for word in ['sim', 'claro', 'ok', 'pode', 'vamos', 'aceito']):
+        set_user_state(message.from_user.id, UserState.WAITING_NAME)
+        bot.reply_to(message, "1️⃣ Qual é o seu primeiro nome?")
+    elif any(word in text for word in ['não', 'nao', 'agora não', 'depois']):
+        set_user_state(message.from_user.id, UserState.GENERAL_CHAT)
+        bot.reply_to(message, "Sem problemas! Posso te ajudar com dúvidas sobre cirurgia bariátrica. É só me perguntar! 💙")
+    else:
+        bot.reply_to(message, "Por favor, responda com 'sim' ou 'não'. Posso te fazer algumas perguntas para te ajudar melhor?")
+
 def handle_name_input(message, user_data):
     name = message.text.strip()
     
-    # Validação básica do nome
     if len(name) < 2 or len(name) > 50:
-        bot.reply_to(message, "❌ Por favor, digite um nome válido (entre 2 e 50 caracteres).")
+        bot.reply_to(message, "Por favor, digite um nome válido.")
         return
     
-    # Limpar caracteres especiais
     name = re.sub(r'[^a-zA-ZÀ-ÿ\s]', '', name).title()
-    
     user_data.name = name
     set_user_state(message.from_user.id, UserState.WAITING_PATIENT_CONFIRMATION)
     
-    bot.reply_to(message, 
-        f"Obrigada, **{user_data.name}**! 😊\n\n2️⃣ Você é a pessoa interessada na cirurgia bariátrica, ou está buscando informações para auxiliar outra pessoa?",
-        parse_mode='Markdown'
-    )
+    bot.reply_to(message, f"Obrigada, {user_data.name}! 😊\n\n2️⃣ Você é a pessoa interessada na cirurgia bariátrica?")
 
 def handle_patient_confirmation(message, user_data):
     text = message.text.lower().strip()
     
-    if any(word in text for word in ['sim', 'sou', 'eu', 'própria', 'mesmo', 'para mim', 'minha', 'meu']):
+    if any(word in text for word in ['sim', 'sou', 'eu', 'própria', 'mesmo']):
         user_data.is_patient = True
         set_user_state(message.from_user.id, UserState.WAITING_AGE)
-        bot.reply_to(message, 
-            f"Perfeito, **{user_data.name}**! Vamos continuar sua avaliação.\n\n3️⃣ Qual é a sua idade?",
-            parse_mode='Markdown'
-        )
+        bot.reply_to(message, f"Perfeito, {user_data.name}!\n\n3️⃣ Qual é a sua idade?")
     
-    elif any(word in text for word in ['não', 'nao', 'outra', 'outra pessoa', 'alguém', 'familiar', 'parente']):
+    elif any(word in text for word in ['não', 'nao', 'outra', 'alguém']):
         user_data.is_patient = False
         set_user_state(message.from_user.id, UserState.WAITING_RELATIONSHIP)
-        bot.reply_to(message, 
-            f"Entendi, **{user_data.name}**. É muito importante o apoio da família! 👨‍👩‍👧‍👦\n\n3️⃣ Qual é o seu grau de parentesco com a pessoa interessada?",
-            parse_mode='Markdown'
-        )
+        bot.reply_to(message, f"Entendi, {user_data.name}. É muito importante o apoio da família!\n\n3️⃣ Qual é o seu grau de parentesco com a pessoa interessada?")
     
     else:
-        bot.reply_to(message, "❓ Por favor, me diga se **você** é a pessoa interessada na cirurgia ou se está buscando informações para **auxiliar outra pessoa**.")
+        bot.reply_to(message, "Por favor, responda 'sim' se você é a pessoa interessada na cirurgia, ou 'não' se está buscando informações para auxiliar outra pessoa.")
 
 def handle_relationship_input(message, user_data):
     user_data.relationship = message.text.strip()
     
-    message_text = f"""Obrigada pela informação, **{user_data.name}**! 
+    message_text = f"""Obrigada, {user_data.name}!
 
-💙 **Orientações importantes sobre apoio familiar:**
+💙 **Orientações sobre apoio familiar:**
 
-• ✅ As orientações médicas devem sempre ser direcionadas pelos profissionais
-• ✅ A decisão final é sempre da pessoa interessada
-• ❌ Não force ou pressione procedimentos cirúrgicos
-• 💪 Seu papel é oferecer apoio emocional e acompanhamento
+• As orientações médicas devem sempre ser direcionadas pelos profissionais habilitados
+• A decisão final é sempre da pessoa interessada
+• Não é ético forçar ou indicar de forma incisiva procedimentos cirúrgicos a outra pessoa
+• Seu papel é oferecer apoio emocional
 
-**📄 Documentos que podem ser necessários:**
+**Documentos que podem ser necessários:**
 • RG e CPF
 • Cartão do SUS ou plano de saúde
 • Comprovante de residência
-• Exames médicos (serão solicitados pelo cirurgião)
 
-Posso continuar te ajudando com orientações gerais sobre o processo. É só me perguntar! 💙"""
+Posso continuar te ajudando com dúvidas sobre o processo. É só me perguntar! 💙"""
     
-    set_user_state(message.from_user.id, UserState.COMPLETED)
-    bot.reply_to(message, message_text, parse_mode='Markdown')
+    set_user_state(message.from_user.id, UserState.HELPER_COMPLETED)
+    bot.reply_to(message, message_text)
 
 def handle_age_input(message, user_data):
     try:
         age = int(message.text.strip())
         if age < 16:
-            bot.reply_to(message, "❌ A cirurgia bariátrica é recomendada apenas para pessoas com 16 anos ou mais.")
+            bot.reply_to(message, "A cirurgia bariátrica é recomendada apenas para pessoas com 16 anos ou mais.")
             return
         elif age > 100:
-            bot.reply_to(message, "❌ Por favor, digite uma idade válida.")
+            bot.reply_to(message, "Por favor, digite uma idade válida.")
             return
         
         user_data.age = str(age)
         set_user_state(message.from_user.id, UserState.WAITING_GENDER)
         
-        bot.reply_to(message, 
-            f"Obrigada, **{user_data.name}**! 😊\n\n4️⃣ Qual é o seu gênero?\n\n• Masculino\n• Feminino\n• Outro",
-            parse_mode='Markdown'
-        )
+        response_msg = get_gendered_message(user_data.name, user_data.gender) if user_data.gender else f"Obrigada, {user_data.name}! 😊"
+        bot.reply_to(message, f"{response_msg}\n\n4️⃣ Qual é o seu gênero?\n\n• Masculino\n• Feminino\n• Outro")
     
     except ValueError:
-        bot.reply_to(message, "❌ Por favor, digite apenas números para a idade (ex: 25).")
+        bot.reply_to(message, "Por favor, digite apenas números para a idade.")
 
 def handle_gender_input(message, user_data):
     gender = message.text.strip().lower()
     
-    if gender in ['masculino', 'homem', 'macho', 'm', 'male']:
+    if gender in ['masculino', 'homem', 'm']:
         user_data.gender = 'masculino'
-    elif gender in ['feminino', 'mulher', 'fêmea', 'f', 'female']:
+        response_msg = f"Obrigado, {user_data.name}! 😊"
+    elif gender in ['feminino', 'mulher', 'f']:
         user_data.gender = 'feminino'
-    elif gender in ['outro', 'outros', 'não-binário', 'nao-binario', 'nb', 'non-binary']:
+        response_msg = f"Obrigada, {user_data.name}! 😊"
+    elif gender in ['outro', 'outros', 'não-binário', 'nao-binario', 'nb']:
         user_data.gender = 'outro'
+        response_msg = f"Obrigada, {user_data.name}! 😊"
     else:
-        bot.reply_to(message, "❌ Por favor, escolha: **masculino**, **feminino** ou **outro**.")
+        bot.reply_to(message, "Por favor, escolha: masculino, feminino ou outro.")
         return
     
     set_user_state(message.from_user.id, UserState.WAITING_HEIGHT)
-    bot.reply_to(message, 
-        f"Obrigada, **{user_data.name}**! 😊\n\n5️⃣ Qual é a sua altura?\n\n📏 Digite em centímetros (ex: **170**)",
-        parse_mode='Markdown'
-    )
+    bot.reply_to(message, f"{response_msg}\n\n5️⃣ Qual é a sua altura?\n\nDigite em centímetros (exemplo: 170)")
 
 def handle_height_input(message, user_data):
     try:
@@ -569,19 +403,17 @@ def handle_height_input(message, user_data):
         height = float(height_text)
         
         if height < 100 or height > 250:
-            bot.reply_to(message, "❌ Por favor, digite uma altura válida em centímetros (ex: **170**).")
+            bot.reply_to(message, "Por favor, digite uma altura válida em centímetros.")
             return
         
         user_data.height = str(height)
         set_user_state(message.from_user.id, UserState.WAITING_WEIGHT)
         
-        bot.reply_to(message, 
-            f"Obrigada, **{user_data.name}**! 😊\n\n6️⃣ Qual é o seu peso atual?\n\n⚖️ Digite em quilos (ex: **85**)",
-            parse_mode='Markdown'
-        )
+        response_msg = get_gendered_message(user_data.name, user_data.gender)
+        bot.reply_to(message, f"{response_msg}\n\n6️⃣ Qual é o seu peso atual?\n\nDigite em quilos (exemplo: 85)")
     
     except ValueError:
-        bot.reply_to(message, "❌ Por favor, digite apenas números para a altura (ex: **170**).")
+        bot.reply_to(message, "Por favor, digite apenas números para a altura.")
 
 def handle_weight_input(message, user_data):
     try:
@@ -589,7 +421,7 @@ def handle_weight_input(message, user_data):
         weight = float(weight_text)
         
         if weight < 30 or weight > 300:
-            bot.reply_to(message, "❌ Por favor, digite um peso válido em quilos (ex: **85**).")
+            bot.reply_to(message, "Por favor, digite um peso válido em quilos.")
             return
         
         user_data.weight = str(weight)
@@ -599,26 +431,28 @@ def handle_weight_input(message, user_data):
         send_complete_report(message, user_data)
     
     except ValueError:
-        bot.reply_to(message, "❌ Por favor, digite apenas números para o peso (ex: **85**).")
+        bot.reply_to(message, "Por favor, digite apenas números para o peso.")
 
 def send_complete_report(message, user_data):
     imc = calculate_imc(user_data.weight, user_data.height)
     
     if imc is None:
-        bot.reply_to(message, "❌ Erro ao calcular IMC. Verifique os dados e tente novamente.")
+        bot.reply_to(message, "❌ Erro ao calcular IMC. Verifique os dados.")
         return
     
     classification, icon = get_imc_classification(imc)
     ans_criteria = get_ans_criteria_message(imc)
     pathways = get_pathways_message()
     
-    report = f"""✅ **Análise completa - {user_data.name}**
+    response_msg = get_gendered_message(user_data.name, user_data.gender)
+    
+    report = f"""{response_msg}
 
 📊 **Seus dados:**
-• **Nome:** {user_data.name}
-• **Idade:** {user_data.age} anos
-• **Altura:** {user_data.height} cm
-• **Peso:** {user_data.weight} kg
+• Nome: {user_data.name}
+• Idade: {user_data.age} anos
+• Altura: {user_data.height} cm
+• Peso: {user_data.weight} kg
 
 🔢 **IMC:** {imc} kg/m²
 {icon} **Classificação:** {classification}
@@ -627,31 +461,69 @@ def send_complete_report(message, user_data):
 
 {pathways}
 
-💡 **Próximos passos recomendados:**
-1. ✅ Consulte um cirurgião bariátrico qualificado
-2. ✅ Realize avaliação multidisciplinar completa
-3. ✅ Faça todos os exames pré-operatórios
-4. ✅ Prepare-se psicologicamente para a mudança
-
-Posso continuar te ajudando com dúvidas específicas! É só me perguntar. 💙"""
+Posso continuar te ajudando com dicas e orientações sobre o pré e pós cirúrgico da bariátrica. É só me chamar! 💙"""
     
-    bot.reply_to(message, report, parse_mode='Markdown')
+    bot.reply_to(message, report)
 
 def handle_general_question(message, user_data):
-    """Sistema melhorado de respostas"""
+    """Respostas para perguntas gerais"""
     text = message.text.strip()
     
-    # Obter resposta do sistema inteligente
-    response = response_engine.get_response(text, user_data.name)
+    # Verificar se é uma pergunta restrita
+    if is_restricted_question(text):
+        bot.reply_to(message, get_restriction_message())
+        return
     
-    bot.reply_to(message, response, parse_mode='Markdown')
+    text_lower = text.lower()
+    
+    if any(word in text_lower for word in ['dieta', 'alimentação', 'comer', 'comida', 'nutrição']):
+        response = """Para orientações sobre alimentação, recomendo que você consulte um nutricionista ou nutrólogo habilitado. Eles são os profissionais capacitados para criar planos alimentares adequados às suas necessidades.
+
+Posso te ajudar com outras dúvidas sobre cirurgia bariátrica! 💙"""
+    
+    elif any(word in text_lower for word in ['técnica', 'bypass', 'sleeve', 'banda', 'cirurgia']):
+        response = """🔬 **Principais técnicas:**
+
+• **Sleeve:** Reduz o tamanho do estômago
+• **Bypass:** Altera o trajeto dos alimentos
+• **Banda:** Utiliza um anel no estômago
+
+A escolha da técnica deve ser discutida com o cirurgião especialista, pois depende de vários fatores individuais.
+
+Para detalhes técnicos específicos, consulte profissionais habilitados.
+
+Outras dúvidas? 💙"""
+    
+    elif any(word in text_lower for word in ['recuperação', 'pós-operatório', 'depois']):
+        response = """🏥 **Recuperação:**
+
+• Acompanhamento médico regular é fundamental
+• Retorno gradual às atividades normais
+• Seguimento das orientações médicas
+• Apoio nutricional e psicológico
+
+Para informações específicas sobre tempos e detalhes do pós-operatório, consulte seu médico.
+
+Posso ajudar com mais alguma coisa? 💙"""
+    
+    else:
+        response = f"""Olá{f', {user_data.name}' if user_data.name else ''}! 💙
+
+Estou aqui para ajudar com dúvidas sobre cirurgia bariátrica. Posso falar sobre:
+
+• Critérios da ANS
+• Documentos necessários
+• Caminhos (particular, plano, SUS)
+• Orientações gerais
+
+Sobre o que você gostaria de saber?"""
+    
+    bot.reply_to(message, response)
 
 # Handlers de erro
 @bot.message_handler(func=lambda message: True, content_types=['photo', 'video', 'document', 'audio', 'voice'])
 def handle_media(message):
-    bot.reply_to(message, 
-        "📎 Obrigada pelo arquivo! No momento, trabalho apenas com mensagens de texto.\n\nComo posso te ajudar com suas dúvidas sobre cirurgia bariátrica? 💙"
-    )
+    bot.reply_to(message, "Trabalho apenas com mensagens de texto. Como posso te ajudar? 💙")
 
 def setup_webhook():
     """Configura webhook para produção"""
@@ -670,7 +542,6 @@ def run_bot():
     if ENVIRONMENT == 'production':
         setup_webhook()
     else:
-        # Desenvolvimento - usar polling
         bot.remove_webhook()
         bot.infinity_polling()
 
@@ -679,11 +550,9 @@ if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
     
     if ENVIRONMENT == 'production':
-        # Produção - webhook
         setup_webhook()
         app.run(host='0.0.0.0', port=port, debug=False)
     else:
-        # Desenvolvimento - polling + Flask
         bot_thread = threading.Thread(target=run_bot)
         bot_thread.daemon = True
         bot_thread.start()
