@@ -6,6 +6,8 @@ import time
 from flask import Flask, request
 import threading
 import re
+import requests
+import json
 
 # Configuração de logging
 logging.basicConfig(
@@ -16,13 +18,14 @@ logger = logging.getLogger(__name__)
 
 # Configuração do bot
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+GROK_API_KEY = os.getenv('GROK_API_KEY')  # Adicionar sua chave do Grok
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # https://seu-app.railway.app/webhook
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')  # production or development
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN não encontrado nas variáveis de ambiente")
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')  # Usar HTML para formatação
 app = Flask(__name__)
 
 # Estados do usuário
@@ -54,6 +57,7 @@ class UserData:
         self.is_patient = None
         self.relationship = ""
         self.last_activity = time.time()
+        self.conversation_history = []
 
 def get_user_data(user_id):
     if user_id not in user_sessions:
@@ -78,6 +82,86 @@ def cleanup_old_sessions():
     for user_id in expired_users:
         del user_sessions[user_id]
         logger.info(f"Cleaned up session for user {user_id}")
+
+def ask_grok(question, user_data=None):
+    """Integração com Grok AI"""
+    if not GROK_API_KEY:
+        return "Desculpe, a IA não está disponível no momento. Posso ajudar com informações básicas sobre cirurgia bariátrica!"
+    
+    try:
+        # Contexto personalizado para cirurgia bariátrica
+        context = """Você é BarIA, uma assistente virtual especializada em cirurgia bariátrica no Brasil. 
+        Você deve ser amigável, empática e dar informações gerais sobre o processo.
+        
+        IMPORTANTE: 
+        - Não forneça valores/preços específicos
+        - Não dê tempos exatos de cirurgia
+        - Não detalhe procedimentos cirúrgicos específicos
+        - Sempre recomende consultar profissionais habilitados para detalhes técnicos
+        - Seja calorosa e humana nas respostas
+        - Use linguagem simples e acessível
+        
+        Informações do usuário:"""
+        
+        if user_data and user_data.name:
+            context += f"\n- Nome: {user_data.name}"
+        if user_data and user_data.age:
+            context += f"\n- Idade: {user_data.age} anos"
+        if user_data and user_data.is_patient is not None:
+            context += f"\n- É paciente: {'Sim' if user_data.is_patient else 'Não'}"
+        
+        # Preparar histórico de conversa
+        messages = [
+            {"role": "system", "content": context},
+        ]
+        
+        # Adicionar histórico recente (últimas 5 mensagens)
+        if user_data and user_data.conversation_history:
+            for msg in user_data.conversation_history[-5:]:
+                messages.append(msg)
+        
+        messages.append({"role": "user", "content": question})
+        
+        # Fazer chamada para Grok (adapte conforme a API do Grok)
+        headers = {
+            "Authorization": f"Bearer {GROK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": "grok-beta",  # Ajuste conforme modelo disponível
+            "messages": messages,
+            "max_tokens": 500,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",  # URL da API do Grok
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            ai_response = result['choices'][0]['message']['content']
+            
+            # Atualizar histórico
+            if user_data:
+                user_data.conversation_history.append({"role": "user", "content": question})
+                user_data.conversation_history.append({"role": "assistant", "content": ai_response})
+                # Manter apenas últimas 10 mensagens
+                if len(user_data.conversation_history) > 10:
+                    user_data.conversation_history = user_data.conversation_history[-10:]
+            
+            return ai_response
+        else:
+            logger.error(f"Grok API error: {response.status_code} - {response.text}")
+            return "Desculpe, tive um probleminha técnico. Pode tentar novamente?"
+    
+    except Exception as e:
+        logger.error(f"Error calling Grok API: {e}")
+        return "Ops! Algo deu errado. Posso tentar responder de outra forma ou você pode perguntar novamente!"
 
 def calculate_imc(weight, height):
     """Calcula o IMC com validação"""
@@ -108,39 +192,24 @@ def get_imc_classification(imc):
     else:
         return "Obesidade grau III", "🔴"
 
-def get_ans_criteria_message(imc):
-    """Retorna mensagem sobre critérios da ANS"""
-    if imc >= 40:
-        return """✅ **Pelo seu IMC, você atende aos critérios da ANS para cirurgia bariátrica:**
-• IMC ≥ 40 kg/m²"""
-    elif imc >= 35:
-        return """⚠️ **Você pode atender aos critérios da ANS se tiver comorbidades:**
-• IMC entre 35-39,9 kg/m²
-• É necessário ter comorbidades como diabetes, hipertensão, apneia do sono, etc.
-• Será preciso avaliação médica para confirmar"""
-    else:
-        return """❌ **Pelo IMC atual, você não atende aos critérios básicos da ANS:**
-• IMC < 35 kg/m²
-• Converse com um médico sobre outras opções"""
-
 def get_pathways_message():
-    """Retorna informações sobre caminhos - SEM VALORES"""
-    return """🏥 **Caminhos para cirurgia bariátrica:**
+    """Retorna informações sobre caminhos"""
+    return """🏥 <b>Caminhos para cirurgia bariátrica:</b>
 
-🔹 **Particular:**
+🔹 <b>Particular:</b>
 • Consulte diretamente com cirurgiões especializados
 • Para informações sobre custos, consulte profissionais habilitados
 
-🔹 **Plano de Saúde:**
+🔹 <b>Plano de Saúde:</b>
 • Cobertura obrigatória pela ANS
 • Período de carência: 24 meses
 • Consulte seu plano para prazos específicos
 
-🔹 **SUS:**
+🔹 <b>SUS:</b>
 • Totalmente gratuito
 • Consulte unidades de saúde para informações sobre fila de espera
 
-📋 **Documentos necessários:**
+📋 <b>Documentos necessários:</b>
 • RG, CPF, comprovante de residência
 • Cartão do SUS ou plano de saúde
 • Histórico médico"""
@@ -167,7 +236,7 @@ def is_restricted_question(text):
 
 def get_restriction_message():
     """Retorna mensagem padrão para temas restritos"""
-    return """⚠️ **Informação restrita**
+    return """⚠️ <b>Informação restrita</b>
 
 Para informações sobre valores, tempos de cirurgia e métodos cirúrgicos específicos, você deve consultar diretamente com:
 
@@ -177,10 +246,6 @@ Para informações sobre valores, tempos de cirurgia e métodos cirúrgicos espe
 • Unidades do SUS
 
 Posso ajudar com outras dúvidas sobre critérios da ANS e documentação necessária! 💙"""
-
-def get_gender_neutral_message(name):
-    """Retorna mensagem sem gênero específico"""
-    return f"Obrigada, {name}! 😊"
 
 def get_gendered_message(name, gender):
     """Retorna mensagem com gênero apropriado"""
@@ -225,7 +290,9 @@ def handle_start(message):
     
     cleanup_old_sessions()
     
-    response = """Olá! 👋 Eu sou a BarIA, sua assistente virtual focada em cirurgia bariátrica no Brasil. Posso te fazer algumas perguntinhas para entender melhor sua situação e te ajudar nessa jornada?"""
+    response = """Olá! 👋 Eu sou a BarIA, sua assistente virtual focada em cirurgia bariátrica no Brasil. 
+
+Posso te fazer algumas perguntinhas para entender melhor sua situação e te ajudar nessa jornada? Ou se preferir, pode me fazer qualquer pergunta sobre o assunto!"""
     
     set_user_state(user_id, UserState.WAITING_CONSENT)
     bot.send_message(message.chat.id, response)
@@ -237,15 +304,15 @@ def handle_custom_commands(message):
     user_data = get_user_data(user_id)
     
     if command == '/criterios':
-        response = """📋 **Critérios da ANS para cirurgia bariátrica:**
+        response = """📋 <b>Critérios da ANS para cirurgia bariátrica:</b>
 
-✅ **Critérios obrigatórios:**
+✅ <b>Critérios obrigatórios:</b>
 • IMC ≥ 40 kg/m² OU
 • IMC ≥ 35 kg/m² + comorbidades (diabetes, hipertensão, apneia do sono, etc.)
 • Idade entre 16 e 65 anos
 • Tentativas de tratamento clínico sem sucesso por pelo menos 2 anos
 
-⚠️ **Observações importantes:**
+⚠️ <b>Observações importantes:</b>
 • Avaliação médica multidisciplinar obrigatória
 • Acompanhamento psicológico necessário
 • Carência de 24 meses no plano de saúde
@@ -253,20 +320,20 @@ def handle_custom_commands(message):
 Para avaliação individual, consulte um cirurgião especialista! 💙"""
     
     elif command == '/documentos':
-        response = """📄 **Documentos necessários:**
+        response = """📄 <b>Documentos necessários:</b>
 
-🔹 **Documentos pessoais:**
+🔹 <b>Documentos pessoais:</b>
 • RG e CPF
 • Comprovante de residência atualizado
 • Cartão do SUS ou carteira do plano de saúde
 
-🔹 **Documentos médicos:**
+🔹 <b>Documentos médicos:</b>
 • Histórico médico completo
 • Exames anteriores (se houver)
 • Relatórios de tentativas de tratamento clínico
 • Comprovação de comorbidades (se aplicável)
 
-🔹 **Para planos de saúde:**
+🔹 <b>Para planos de saúde:</b>
 • Declaração de carência cumprida
 • Guia de solicitação de procedimento
 
@@ -276,21 +343,21 @@ Consulte sempre com o local onde fará o procedimento para lista completa! 💙"
         response = get_pathways_message()
     
     elif command == '/orientacoes':
-        response = """💡 **Orientações gerais:**
+        response = """💡 <b>Orientações gerais:</b>
 
-🔹 **Antes da cirurgia:**
+🔹 <b>Antes da cirurgia:</b>
 • Consulte cirurgião especialista
 • Faça avaliação multidisciplinar
 • Prepare-se psicologicamente
 • Organize documentação
 
-🔹 **Pós-operatório:**
+🔹 <b>Pós-operatório:</b>
 • Siga rigorosamente as orientações médicas
 • Mantenha acompanhamento nutricional
 • Realize atividade física conforme orientação
 • Participe de grupos de apoio
 
-🔹 **Dicas importantes:**
+🔹 <b>Dicas importantes:</b>
 • Não tome decisões por impulso
 • Busque informações em fontes confiáveis
 • Conte com apoio familiar
@@ -359,25 +426,27 @@ def handle_consent(message, user_data):
     
     if any(word in text for word in ['sim', 'claro', 'ok', 'pode', 'vamos', 'aceito']):
         set_user_state(message.from_user.id, UserState.WAITING_NAME)
-        bot.reply_to(message, "1️⃣ Qual é o seu primeiro nome?")
+        bot.reply_to(message, "Que bom! Vamos começar então 😊\n\n1️⃣ Qual é o seu primeiro nome?")
     elif any(word in text for word in ['não', 'nao', 'agora não', 'depois']):
         set_user_state(message.from_user.id, UserState.GENERAL_CHAT)
-        bot.reply_to(message, "Sem problemas! Posso te ajudar com dúvidas sobre cirurgia bariátrica. É só me perguntar! 💙")
+        bot.reply_to(message, "Sem problemas! Fico aqui para tirar suas dúvidas sobre cirurgia bariátrica. Pode me perguntar qualquer coisa! 💙")
     else:
-        bot.reply_to(message, "Por favor, responda com 'sim' ou 'não'. Posso te fazer algumas perguntas para te ajudar melhor?")
+        # Usar IA para responder de forma mais natural
+        ai_response = ask_grok(f"O usuário disse: '{message.text}'. Ele estava sendo perguntado se queria responder algumas perguntas para receber orientações personalizadas. Responda de forma amigável pedindo uma confirmação mais clara.", user_data)
+        bot.reply_to(message, ai_response)
 
 def handle_name_input(message, user_data):
     name = message.text.strip()
     
     if len(name) < 2 or len(name) > 50:
-        bot.reply_to(message, "Por favor, digite um nome válido.")
+        bot.reply_to(message, "Hmm, esse nome parece estar incompleto. Pode me dizer seu primeiro nome?")
         return
     
     name = re.sub(r'[^a-zA-ZÀ-ÿ\s]', '', name).title()
     user_data.name = name
     set_user_state(message.from_user.id, UserState.WAITING_PATIENT_CONFIRMATION)
     
-    bot.reply_to(message, f"Obrigada, {user_data.name}! 😊\n\n2️⃣ Você é a pessoa interessada na cirurgia bariátrica?")
+    bot.reply_to(message, f"Prazer te conhecer, {user_data.name}! 😊\n\n2️⃣ Você é a pessoa interessada na cirurgia bariátrica?")
 
 def handle_patient_confirmation(message, user_data):
     text = message.text.lower().strip()
@@ -385,34 +454,38 @@ def handle_patient_confirmation(message, user_data):
     if any(word in text for word in ['sim', 'sou', 'eu', 'própria', 'mesmo']):
         user_data.is_patient = True
         set_user_state(message.from_user.id, UserState.WAITING_AGE)
-        bot.reply_to(message, f"Perfeito, {user_data.name}!\n\n3️⃣ Qual é a sua idade?")
+        bot.reply_to(message, f"Perfeito, {user_data.name}! Vou te ajudar da melhor forma possível 💙\n\n3️⃣ Qual é a sua idade?")
     
     elif any(word in text for word in ['não', 'nao', 'outra', 'alguém']):
         user_data.is_patient = False
         set_user_state(message.from_user.id, UserState.WAITING_RELATIONSHIP)
-        bot.reply_to(message, f"Entendi, {user_data.name}. É muito importante o apoio da família!\n\n3️⃣ Qual é o seu grau de parentesco com a pessoa interessada?")
+        bot.reply_to(message, f"Entendi, {user_data.name}. Que legal você estar apoiando essa pessoa! O suporte da família é muito importante nessa jornada 💙\n\n3️⃣ Qual é o seu grau de parentesco com a pessoa interessada?")
     
     else:
-        bot.reply_to(message, "Por favor, responda 'sim' se você é a pessoa interessada na cirurgia, ou 'não' se está buscando informações para auxiliar outra pessoa.")
+        # Usar IA para responder de forma mais natural
+        ai_response = ask_grok(f"O usuário disse: '{message.text}'. Ele estava sendo perguntado se era a pessoa interessada na cirurgia bariátrica. Responda de forma amigável pedindo esclarecimento.", user_data)
+        bot.reply_to(message, ai_response)
 
 def handle_relationship_input(message, user_data):
     user_data.relationship = message.text.strip()
     
-    message_text = f"""Obrigada, {user_data.name}!
+    message_text = f"""Que bom saber, {user_data.name}! 
 
-💙 **Orientações sobre apoio familiar:**
+💙 <b>Sobre o apoio familiar:</b>
 
-• As orientações médicas devem sempre ser direcionadas pelos profissionais habilitados
+O apoio da família é fundamental nessa jornada! Algumas dicas importantes:
+
+• As orientações médicas devem sempre ser direcionadas pelos profissionais
 • A decisão final é sempre da pessoa interessada
-• Não é ético forçar ou indicar de forma incisiva procedimentos cirúrgicos a outra pessoa
-• Seu papel é oferecer apoio emocional
+• Seu papel é oferecer apoio emocional e prático
+• Acompanhe as consultas quando possível
 
-**Documentos que podem ser necessários:**
+<b>Documentos que podem ser úteis:</b>
 • RG e CPF
 • Cartão do SUS ou plano de saúde
 • Comprovante de residência
 
-Posso continuar te ajudando com dúvidas sobre o processo. É só me perguntar! 💙"""
+Estou aqui para tirar suas dúvidas sobre todo o processo! 💙"""
     
     set_user_state(message.from_user.id, UserState.HELPER_COMPLETED)
     bot.reply_to(message, message_text)
@@ -421,20 +494,19 @@ def handle_age_input(message, user_data):
     try:
         age = int(message.text.strip())
         if age < 16:
-            bot.reply_to(message, "A cirurgia bariátrica é recomendada apenas para pessoas com 16 anos ou mais.")
+            bot.reply_to(message, "A cirurgia bariátrica é indicada para pessoas com 16 anos ou mais. É importante conversar com um médico sobre isso.")
             return
         elif age > 100:
-            bot.reply_to(message, "Por favor, digite uma idade válida.")
+            bot.reply_to(message, "Hmm, essa idade não parece estar correta. Pode me dizer sua idade novamente?")
             return
         
         user_data.age = str(age)
         set_user_state(message.from_user.id, UserState.WAITING_GENDER)
         
-        response_msg = get_gendered_message(user_data.name, user_data.gender) if user_data.gender else f"Obrigada, {user_data.name}! 😊"
-        bot.reply_to(message, f"{response_msg}\n\n4️⃣ Qual é o seu gênero?\n\n• Masculino\n• Feminino\n• Outro")
+        bot.reply_to(message, f"Anotado! 😊\n\n4️⃣ Como você se identifica?\n\n• Masculino\n• Feminino\n• Outro")
     
     except ValueError:
-        bot.reply_to(message, "Por favor, digite apenas números para a idade.")
+        bot.reply_to(message, "Por favor, me diga sua idade usando apenas números (exemplo: 35)")
 
 def handle_gender_input(message, user_data):
     gender = message.text.strip().lower()
@@ -449,37 +521,37 @@ def handle_gender_input(message, user_data):
         user_data.gender = 'outro'
         response_msg = f"Obrigada, {user_data.name}! 😊"
     else:
-        bot.reply_to(message, "Por favor, escolha: masculino, feminino ou outro.")
+        bot.reply_to(message, "Pode me dizer como se identifica? Masculino, feminino ou outro?")
         return
     
     set_user_state(message.from_user.id, UserState.WAITING_HEIGHT)
-    bot.reply_to(message, f"{response_msg}\n\n5️⃣ Qual é a sua altura?\n\nDigite em centímetros (exemplo: 170)")
+    bot.reply_to(message, f"{response_msg}\n\n5️⃣ Qual é a sua altura? (exemplo: 170 cm)")
 
 def handle_height_input(message, user_data):
     try:
-        height_text = message.text.strip().replace(',', '.')
+        height_text = message.text.strip().replace(',', '.').replace('cm', '').replace('m', '')
         height = float(height_text)
         
         if height < 100 or height > 250:
-            bot.reply_to(message, "Por favor, digite uma altura válida em centímetros.")
+            bot.reply_to(message, "Hmm, essa altura não parece estar correta. Pode me dizer novamente em centímetros?")
             return
         
         user_data.height = str(height)
         set_user_state(message.from_user.id, UserState.WAITING_WEIGHT)
         
         response_msg = get_gendered_message(user_data.name, user_data.gender)
-        bot.reply_to(message, f"{response_msg}\n\n6️⃣ Qual é o seu peso atual?\n\nDigite em quilos (exemplo: 85)")
+        bot.reply_to(message, f"{response_msg}\n\n6️⃣ E qual é o seu peso atual? (exemplo: 85 kg)")
     
     except ValueError:
-        bot.reply_to(message, "Por favor, digite apenas números para a altura.")
+        bot.reply_to(message, "Por favor, me diga sua altura usando números (exemplo: 170)")
 
 def handle_weight_input(message, user_data):
     try:
-        weight_text = message.text.strip().replace(',', '.')
+        weight_text = message.text.strip().replace(',', '.').replace('kg', '')
         weight = float(weight_text)
         
         if weight < 30 or weight > 300:
-            bot.reply_to(message, "Por favor, digite um peso válido em quilos.")
+            bot.reply_to(message, "Esse peso não parece estar correto. Pode me dizer novamente?")
             return
         
         user_data.weight = str(weight)
@@ -489,42 +561,42 @@ def handle_weight_input(message, user_data):
         send_complete_report(message, user_data)
     
     except ValueError:
-        bot.reply_to(message, "Por favor, digite apenas números para o peso.")
+        bot.reply_to(message, "Por favor, me diga seu peso usando números (exemplo: 85)")
 
 def send_complete_report(message, user_data):
     imc = calculate_imc(user_data.weight, user_data.height)
     
     if imc is None:
-        bot.reply_to(message, "❌ Erro ao calcular IMC. Verifique os dados.")
+        bot.reply_to(message, "❌ Ops, algo deu errado no cálculo. Pode verificar se as informações estão corretas?")
         return
     
     classification, icon = get_imc_classification(imc)
-    ans_criteria = get_ans_criteria_message(imc)
     pathways = get_pathways_message()
     
     response_msg = get_gendered_message(user_data.name, user_data.gender)
     
+    # Relatório mais humanizado, sem avaliação de critérios
     report = f"""{response_msg}
 
-📊 **Seus dados:**
+📊 <b>Suas informações:</b>
 • Nome: {user_data.name}
 • Idade: {user_data.age} anos
 • Altura: {user_data.height} cm
 • Peso: {user_data.weight} kg
 
-🔢 **IMC:** {imc} kg/m²
-{icon} **Classificação:** {classification}
+🔢 <b>Seu IMC:</b> {imc} kg/m²
+{icon} <b>Classificação:</b> {classification}
 
-{ans_criteria}
+Agora que tenho essas informações, posso te orientar melhor sobre o processo da cirurgia bariátrica! 
 
 {pathways}
 
-Posso continuar te ajudando com dicas e orientações sobre o pré e pós cirúrgico da bariátrica. É só me chamar! 💙"""
+Fico aqui para tirar suas dúvidas e te acompanhar nessa jornada! 💙"""
     
     bot.reply_to(message, report)
 
 def handle_general_question(message, user_data):
-    """Respostas para perguntas gerais"""
+    """Usar IA para responder perguntas gerais"""
     text = message.text.strip()
     
     # Verificar se é uma pergunta restrita
@@ -532,130 +604,16 @@ def handle_general_question(message, user_data):
         bot.reply_to(message, get_restriction_message())
         return
     
-    text_lower = text.lower()
-    
-    # Critérios da ANS
-    if any(word in text_lower for word in ['criterios', 'critérios', 'ans', 'requisitos', 'exigências', 'condições']):
-        response = """📋 **Critérios da ANS para cirurgia bariátrica:**
-
-✅ **Critérios obrigatórios:**
-• IMC ≥ 40 kg/m² OU
-• IMC ≥ 35 kg/m² + comorbidades (diabetes, hipertensão, apneia do sono, etc.)
-• Idade entre 16 e 65 anos
-• Tentativas de tratamento clínico sem sucesso por pelo menos 2 anos
-
-⚠️ **Observações importantes:**
-• Avaliação médica multidisciplinar obrigatória
-• Acompanhamento psicológico necessário
-• Carência de 24 meses no plano de saúde
-
-Para avaliação individual, consulte um cirurgião especialista! 💙"""
-    
-    # Documentos necessários
-    elif any(word in text_lower for word in ['documentos', 'papéis', 'papeis', 'documentação', 'preciso levar']):
-        response = """📄 **Documentos necessários:**
-
-🔹 **Documentos pessoais:**
-• RG e CPF
-• Comprovante de residência atualizado
-• Cartão do SUS ou carteira do plano de saúde
-
-🔹 **Documentos médicos:**
-• Histórico médico completo
-• Exames anteriores (se houver)
-• Relatórios de tentativas de tratamento clínico
-• Comprovação de comorbidades (se aplicável)
-
-🔹 **Para planos de saúde:**
-• Declaração de carência cumprida
-• Guia de solicitação de procedimento
-
-Consulte sempre com o local onde fará o procedimento para lista completa! 💙"""
-    
-    # Caminhos para cirurgia
-    elif any(word in text_lower for word in ['caminhos', 'caminho', 'onde fazer', 'como fazer', 'particular', 'plano', 'sus']):
-        response = get_pathways_message()
-    
-    # Orientações gerais
-    elif any(word in text_lower for word in ['orientações', 'orientacoes', 'gerais', 'geral', 'informações', 'informacoes']):
-        response = """💡 **Orientações gerais:**
-
-🔹 **Antes da cirurgia:**
-• Consulte cirurgião especialista
-• Faça avaliação multidisciplinar
-• Prepare-se psicologicamente
-• Organize documentação
-
-🔹 **Pós-operatório:**
-• Siga rigorosamente as orientações médicas
-• Mantenha acompanhamento nutricional
-• Realize atividade física conforme orientação
-• Participe de grupos de apoio
-
-🔹 **Dicas importantes:**
-• Não tome decisões por impulso
-• Busque informações em fontes confiáveis
-• Conte com apoio familiar
-• Tenha paciência com o processo
-
-Outras dúvidas específicas? 💙"""
-    
-    # Dieta e alimentação
-    elif any(word in text_lower for word in ['dieta', 'alimentação', 'comer', 'comida', 'nutrição']):
-        response = """🥗 **Sobre alimentação:**
-
-Para orientações sobre alimentação pré e pós-operatória, é fundamental consultar um nutricionista ou nutrólogo habilitado. Eles são os profissionais capacitados para criar planos alimentares adequados às suas necessidades específicas.
-
-Cada caso é único e requer acompanhamento profissional personalizado.
-
-Posso te ajudar com outras dúvidas sobre cirurgia bariátrica! 💙"""
-    
-    # Técnicas cirúrgicas
-    elif any(word in text_lower for word in ['técnica', 'tecnica', 'bypass', 'sleeve', 'banda', 'cirurgia', 'tipos']):
-        response = """🔬 **Principais técnicas:**
-
-• **Sleeve:** Reduz o tamanho do estômago
-• **Bypass:** Altera o trajeto dos alimentos
-• **Banda:** Utiliza um anel no estômago
-
-A escolha da técnica deve ser discutida com o cirurgião especialista, pois depende de vários fatores individuais como IMC, comorbidades, histórico médico e preferências.
-
-Para detalhes técnicos específicos, consulte profissionais habilitados.
-
-Outras dúvidas? 💙"""
-    
-    # Recuperação
-    elif any(word in text_lower for word in ['recuperação', 'recuperacao', 'pós-operatório', 'pos-operatorio', 'depois']):
-        response = """🏥 **Recuperação:**
-
-• Acompanhamento médico regular é fundamental
-• Retorno gradual às atividades normais
-• Seguimento das orientações médicas
-• Apoio nutricional e psicológico contínuo
-
-Para informações específicas sobre tempos e detalhes do pós-operatório, consulte seu médico especialista.
-
-Posso ajudar com mais alguma coisa? 💙"""
-    
-    # Resposta padrão
-    else:
-        response = f"""Olá{f', {user_data.name}' if user_data.name else ''}! 💙
-
-Estou aqui para ajudar com dúvidas sobre cirurgia bariátrica. Posso falar sobre:
-
-• **Critérios da ANS** - requisitos obrigatórios
-• **Documentos necessários** - papéis para levar
-• **Caminhos** - particular, plano de saúde, SUS
-• **Orientações gerais** - dicas importantes
-
-Digite uma dessas opções ou me faça uma pergunta específica!"""
-    
-    bot.reply_to(message, response)
+    # Usar IA para responder de forma mais natural
+    ai_response = ask_grok(text, user_data)
+    bot.reply_to(message, ai_response)
 
 # Handlers de erro
 @bot.message_handler(func=lambda message: True, content_types=['photo', 'video', 'document', 'audio', 'voice'])
 def handle_media(message):
-    bot.reply_to(message, "Trabalho apenas com mensagens de texto. Como posso te ajudar? 💙")
+    user_data = get_user_data(message.from_user.id)
+    response = ask_grok("O usuário enviou uma mídia (foto, vídeo, áudio, etc). Responda de forma amigável que você trabalha apenas com texto.", user_data)
+    bot.reply_to(message, response)
 
 def setup_webhook():
     """Configura webhook para produção"""
