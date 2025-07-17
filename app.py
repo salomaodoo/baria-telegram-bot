@@ -230,17 +230,75 @@ def handle_start(message):
     set_user_state(user_id, UserState.WAITING_CONSENT)
     bot.send_message(message.chat.id, response)
 
-@bot.message_handler(commands=['help'])
-def handle_help(message):
-    help_text = """🤖 **Comandos disponíveis:**
-
-• `/start` - Iniciar conversa
-• `/help` - Ver esta ajuda
-• `/reset` - Recomeçar avaliação
-
-Digite /start para começar! 💙"""
+@bot.message_handler(commands=['criterios', 'documentos', 'caminhos', 'orientacoes'])
+def handle_custom_commands(message):
+    command = message.text.lower().strip()
+    user_id = message.from_user.id
+    user_data = get_user_data(user_id)
     
-    bot.send_message(message.chat.id, help_text)
+    if command == '/criterios':
+        response = """📋 **Critérios da ANS para cirurgia bariátrica:**
+
+✅ **Critérios obrigatórios:**
+• IMC ≥ 40 kg/m² OU
+• IMC ≥ 35 kg/m² + comorbidades (diabetes, hipertensão, apneia do sono, etc.)
+• Idade entre 16 e 65 anos
+• Tentativas de tratamento clínico sem sucesso por pelo menos 2 anos
+
+⚠️ **Observações importantes:**
+• Avaliação médica multidisciplinar obrigatória
+• Acompanhamento psicológico necessário
+• Carência de 24 meses no plano de saúde
+
+Para avaliação individual, consulte um cirurgião especialista! 💙"""
+    
+    elif command == '/documentos':
+        response = """📄 **Documentos necessários:**
+
+🔹 **Documentos pessoais:**
+• RG e CPF
+• Comprovante de residência atualizado
+• Cartão do SUS ou carteira do plano de saúde
+
+🔹 **Documentos médicos:**
+• Histórico médico completo
+• Exames anteriores (se houver)
+• Relatórios de tentativas de tratamento clínico
+• Comprovação de comorbidades (se aplicável)
+
+🔹 **Para planos de saúde:**
+• Declaração de carência cumprida
+• Guia de solicitação de procedimento
+
+Consulte sempre com o local onde fará o procedimento para lista completa! 💙"""
+    
+    elif command == '/caminhos':
+        response = get_pathways_message()
+    
+    elif command == '/orientacoes':
+        response = """💡 **Orientações gerais:**
+
+🔹 **Antes da cirurgia:**
+• Consulte cirurgião especialista
+• Faça avaliação multidisciplinar
+• Prepare-se psicologicamente
+• Organize documentação
+
+🔹 **Pós-operatório:**
+• Siga rigorosamente as orientações médicas
+• Mantenha acompanhamento nutricional
+• Realize atividade física conforme orientação
+• Participe de grupos de apoio
+
+🔹 **Dicas importantes:**
+• Não tome decisões por impulso
+• Busque informações em fontes confiáveis
+• Conte com apoio familiar
+• Tenha paciência com o processo
+
+Outras dúvidas específicas? 💙"""
+    
+    bot.send_message(message.chat.id, response)
 
 @bot.message_handler(commands=['reset'])
 def handle_reset(message):
@@ -476,47 +534,121 @@ def handle_general_question(message, user_data):
     
     text_lower = text.lower()
     
-    if any(word in text_lower for word in ['dieta', 'alimentação', 'comer', 'comida', 'nutrição']):
-        response = """Para orientações sobre alimentação, recomendo que você consulte um nutricionista ou nutrólogo habilitado. Eles são os profissionais capacitados para criar planos alimentares adequados às suas necessidades.
+    # Critérios da ANS
+    if any(word in text_lower for word in ['criterios', 'critérios', 'ans', 'requisitos', 'exigências', 'condições']):
+        response = """📋 **Critérios da ANS para cirurgia bariátrica:**
+
+✅ **Critérios obrigatórios:**
+• IMC ≥ 40 kg/m² OU
+• IMC ≥ 35 kg/m² + comorbidades (diabetes, hipertensão, apneia do sono, etc.)
+• Idade entre 16 e 65 anos
+• Tentativas de tratamento clínico sem sucesso por pelo menos 2 anos
+
+⚠️ **Observações importantes:**
+• Avaliação médica multidisciplinar obrigatória
+• Acompanhamento psicológico necessário
+• Carência de 24 meses no plano de saúde
+
+Para avaliação individual, consulte um cirurgião especialista! 💙"""
+    
+    # Documentos necessários
+    elif any(word in text_lower for word in ['documentos', 'papéis', 'papeis', 'documentação', 'preciso levar']):
+        response = """📄 **Documentos necessários:**
+
+🔹 **Documentos pessoais:**
+• RG e CPF
+• Comprovante de residência atualizado
+• Cartão do SUS ou carteira do plano de saúde
+
+🔹 **Documentos médicos:**
+• Histórico médico completo
+• Exames anteriores (se houver)
+• Relatórios de tentativas de tratamento clínico
+• Comprovação de comorbidades (se aplicável)
+
+🔹 **Para planos de saúde:**
+• Declaração de carência cumprida
+• Guia de solicitação de procedimento
+
+Consulte sempre com o local onde fará o procedimento para lista completa! 💙"""
+    
+    # Caminhos para cirurgia
+    elif any(word in text_lower for word in ['caminhos', 'caminho', 'onde fazer', 'como fazer', 'particular', 'plano', 'sus']):
+        response = get_pathways_message()
+    
+    # Orientações gerais
+    elif any(word in text_lower for word in ['orientações', 'orientacoes', 'gerais', 'geral', 'informações', 'informacoes']):
+        response = """💡 **Orientações gerais:**
+
+🔹 **Antes da cirurgia:**
+• Consulte cirurgião especialista
+• Faça avaliação multidisciplinar
+• Prepare-se psicologicamente
+• Organize documentação
+
+🔹 **Pós-operatório:**
+• Siga rigorosamente as orientações médicas
+• Mantenha acompanhamento nutricional
+• Realize atividade física conforme orientação
+• Participe de grupos de apoio
+
+🔹 **Dicas importantes:**
+• Não tome decisões por impulso
+• Busque informações em fontes confiáveis
+• Conte com apoio familiar
+• Tenha paciência com o processo
+
+Outras dúvidas específicas? 💙"""
+    
+    # Dieta e alimentação
+    elif any(word in text_lower for word in ['dieta', 'alimentação', 'comer', 'comida', 'nutrição']):
+        response = """🥗 **Sobre alimentação:**
+
+Para orientações sobre alimentação pré e pós-operatória, é fundamental consultar um nutricionista ou nutrólogo habilitado. Eles são os profissionais capacitados para criar planos alimentares adequados às suas necessidades específicas.
+
+Cada caso é único e requer acompanhamento profissional personalizado.
 
 Posso te ajudar com outras dúvidas sobre cirurgia bariátrica! 💙"""
     
-    elif any(word in text_lower for word in ['técnica', 'bypass', 'sleeve', 'banda', 'cirurgia']):
+    # Técnicas cirúrgicas
+    elif any(word in text_lower for word in ['técnica', 'tecnica', 'bypass', 'sleeve', 'banda', 'cirurgia', 'tipos']):
         response = """🔬 **Principais técnicas:**
 
 • **Sleeve:** Reduz o tamanho do estômago
 • **Bypass:** Altera o trajeto dos alimentos
 • **Banda:** Utiliza um anel no estômago
 
-A escolha da técnica deve ser discutida com o cirurgião especialista, pois depende de vários fatores individuais.
+A escolha da técnica deve ser discutida com o cirurgião especialista, pois depende de vários fatores individuais como IMC, comorbidades, histórico médico e preferências.
 
 Para detalhes técnicos específicos, consulte profissionais habilitados.
 
 Outras dúvidas? 💙"""
     
-    elif any(word in text_lower for word in ['recuperação', 'pós-operatório', 'depois']):
+    # Recuperação
+    elif any(word in text_lower for word in ['recuperação', 'recuperacao', 'pós-operatório', 'pos-operatorio', 'depois']):
         response = """🏥 **Recuperação:**
 
 • Acompanhamento médico regular é fundamental
 • Retorno gradual às atividades normais
 • Seguimento das orientações médicas
-• Apoio nutricional e psicológico
+• Apoio nutricional e psicológico contínuo
 
-Para informações específicas sobre tempos e detalhes do pós-operatório, consulte seu médico.
+Para informações específicas sobre tempos e detalhes do pós-operatório, consulte seu médico especialista.
 
 Posso ajudar com mais alguma coisa? 💙"""
     
+    # Resposta padrão
     else:
         response = f"""Olá{f', {user_data.name}' if user_data.name else ''}! 💙
 
 Estou aqui para ajudar com dúvidas sobre cirurgia bariátrica. Posso falar sobre:
 
-• Critérios da ANS
-• Documentos necessários
-• Caminhos (particular, plano, SUS)
-• Orientações gerais
+• **Critérios da ANS** - requisitos obrigatórios
+• **Documentos necessários** - papéis para levar
+• **Caminhos** - particular, plano de saúde, SUS
+• **Orientações gerais** - dicas importantes
 
-Sobre o que você gostaria de saber?"""
+Digite uma dessas opções ou me faça uma pergunta específica!"""
     
     bot.reply_to(message, response)
 
