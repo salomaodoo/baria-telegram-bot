@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Configuração do bot
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-GROK_API_KEY = os.getenv('GROK_API_KEY')  # Adicionar sua chave do Grok
+GROK_API_KEY = os.getenv('GROK_API_KEY')  # Usar sua chave do Groq Cloud
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')  # https://seu-app.railway.app/webhook
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')  # production or development
 
@@ -84,7 +84,7 @@ def cleanup_old_sessions():
         logger.info(f"Cleaned up session for user {user_id}")
 
 def ask_grok(question, user_data=None):
-    """Integração com Grok AI"""
+    """Integração com Groq Cloud AI"""
     if not GROK_API_KEY:
         return "Desculpe, a IA não está disponível no momento. Posso ajudar com informações básicas sobre cirurgia bariátrica!"
     
@@ -122,21 +122,21 @@ def ask_grok(question, user_data=None):
         
         messages.append({"role": "user", "content": question})
         
-        # Fazer chamada para Grok (adapte conforme a API do Grok)
+        # Fazer chamada para Groq Cloud
         headers = {
             "Authorization": f"Bearer {GROK_API_KEY}",
             "Content-Type": "application/json"
         }
         
         data = {
-            "model": "grok-beta",  # Ajuste conforme modelo disponível
+            "model": "llama-3.3-70b-versatile",  # Modelo do Groq Cloud
             "messages": messages,
             "max_tokens": 500,
             "temperature": 0.7
         }
         
         response = requests.post(
-            "https://api.x.ai/v1/chat/completions",  # URL da API do Grok
+            "https://api.groq.com/openai/v1/chat/completions",  # URL da API do Groq Cloud
             headers=headers,
             json=data,
             timeout=30
@@ -156,11 +156,11 @@ def ask_grok(question, user_data=None):
             
             return ai_response
         else:
-            logger.error(f"Grok API error: {response.status_code} - {response.text}")
+            logger.error(f"Groq API error: {response.status_code} - {response.text}")
             return "Desculpe, tive um probleminha técnico. Pode tentar novamente?"
     
     except Exception as e:
-        logger.error(f"Error calling Grok API: {e}")
+        logger.error(f"Error calling Groq API: {e}")
         return "Ops! Algo deu errado. Posso tentar responder de outra forma ou você pode perguntar novamente!"
 
 def calculate_imc(weight, height):
