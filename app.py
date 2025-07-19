@@ -647,3 +647,174 @@ if __name__ == "__main__":
         bot_thread.daemon = True
         bot_thread.start()
         app.run(host='0.0.0.0', port=port, debug=True)
+        bot.reply_to(message, "⚠️ A cirurgia bariátrica é indicada para pessoas a partir de 16 anos. Para menores, é necessário avaliação médica especializada.")
+            return
+        elif age > 65:
+            age_warning = f"⚠️ <b>Atenção, {user_data.name}!</b>\n\nA cirurgia bariátrica após os 65 anos requer avaliação médica muito criteriosa. Recomendo consultar um cirurgião especialista para análise individual."
+            bot.reply_to(message, age_warning)
+        
+        user_data.age = str(age)
+        set_user_state(message.from_user.id, UserState.WAITING_GENDER)
+        
+        gender_msg = f"4️⃣ Qual é o seu gênero, {user_data.name}?"
+        markup = create_gender_keyboard()
+        bot.reply_to(message, gender_msg, reply_markup=markup)
+    
+    except ValueError:
+        bot.reply_to(message, "Por favor, digite apenas números para a idade (exemplo: 35)")
+
+def handle_height_input(message, user_data):
+    try:
+        height = float(message.text.strip())
+        
+        if height < 100 or height > 250:
+            bot.reply_to(message, "Altura deve estar entre 100 e 250 cm. Pode verificar e digitar novamente?")
+            return
+        
+        user_data.height = str(int(height))
+        
+        if user_data.state == UserState.WAITING_HEIGHT and not user_data.weight:
+            # Fluxo normal - pedir peso
+            set_user_state(message.from_user.id, UserState.WAITING_WEIGHT)
+            
+            if user_data.name:
+                weight_msg = f"6️⃣ E qual é o seu peso atual, {user_data.name}? (exemplo: 95)"
+            else:
+                weight_msg = "2️⃣ Agora me diga seu peso atual (exemplo: 95)"
+            
+            bot.reply_to(message, weight_msg)
+        
+    except ValueError:
+        bot.reply_to(message, "Por favor, digite apenas números para a altura (exemplo: 170)")
+
+def handle_weight_input(message, user_data):
+    try:
+        weight = float(message.text.strip())
+        
+        if weight < 30 or weight > 300:
+            bot.reply_to(message, "Peso deve estar entre 30 e 300 kg. Pode verificar e digitar novamente?")
+            return
+        
+        user_data.weight = str(int(weight))
+        
+        # Calcular IMC
+        imc = calculate_imc(user_data.weight, user_data.height)
+        if imc is None:
+            bot.reply_to(message, "❌ Erro no cálculo. Vamos tentar novamente:")
+            return
+        
+        classification, emoji = get_imc_classification(imc)
+        
+        # Preparar mensagem baseada nos dados coletados
+        if user_data.name and user_data.is_patient is not None:
+            # Dados completos
+            result_msg = f"""✅ <b>Dados coletados com sucesso!</b>
+
+📊 <b>Resumo:</b>
+• Nome: {user_data.name}
+• Idade: {user_data.age} anos
+• Altura: {user_data.height} cm
+• Peso: {user_data.weight} kg
+• IMC: {imc} kg/m²
+• Classificação: {classification} {emoji}
+
+<b>Análise:</b>"""
+            
+            # Análise específica do IMC
+            if imc >= 40:
+                result_msg += f"\n✅ Seu IMC ({imc}) está na faixa que pode indicar cirurgia bariátrica segundo critérios da ANS."
+            elif imc >= 35:
+                result_msg += f"\n⚠️ Seu IMC ({imc}) pode indicar cirurgia se houver comorbidades (diabetes, hipertensão, etc.)."
+            else:
+                result_msg += f"\n💙 Seu IMC ({imc}) não está na faixa típica para cirurgia bariátrica, mas consulte um médico para avaliação completa."
+            
+            result_msg += "\n\n💙 <b>Próximos passos:</b>\n• Consulte um cirurgião especialista\n• Faça avaliação médica completa\n• Tire todas suas dúvidas!"
+            
+            set_user_state(message.from_user.id, UserState.COMPLETED)
+        else:
+            # IMC rápido
+            result_msg = f"""🧮 <b>Resultado do seu IMC:</b>
+
+📊 <b>Seus dados:</b>
+• Altura: {user_data.height} cm
+• Peso: {user_data.weight} kg
+• IMC: {imc} kg/m²
+• Classificação: {classification} {emoji}
+
+<b>Sobre cirurgia bariátrica:</b>"""
+            
+            if imc >= 40:
+                result_msg += f"\n✅ Seu IMC ({imc}) está na faixa que pode indicar cirurgia bariátrica."
+            elif imc >= 35:
+                result_msg += f"\n⚠️ Seu IMC ({imc}) pode indicar cirurgia se houver comorbidades."
+            else:
+                result_msg += f"\n💙 Seu IMC ({imc}) não está na faixa típica para cirurgia bariátrica."
+            
+            result_msg += "\n\n💡 Consulte sempre um médico especialista para avaliação completa!"
+        
+        markup = create_main_menu()
+        bot.reply_to(message, result_msg, reply_markup=markup)
+        
+    except ValueError:
+        bot.reply_to(message, "Por favor, digite apenas números para o peso (exemplo: 95)")
+
+def handle_general_question(message, user_data):
+    question = message.text.strip()
+    
+    # Verificar se é uma pergunta restrita
+    if is_restricted_question(question):
+        restriction_msg = get_restriction_message()
+        markup = create_main_menu()
+        bot.reply_to(message, restriction_msg, reply_markup=markup)
+        return
+    
+    # Usar IA para responder
+    ai_response = ask_grok(question, user_data)
+    
+    # Adicionar menu no final
+    final_response = f"{ai_response}\n\n💙 Posso ajudar com mais alguma coisa?"
+    markup = create_main_menu()
+    bot.reply_to(message, final_response, reply_markup=markup)
+
+# Configurar webhook ou polling
+def run_bot():
+    try:
+        if ENVIRONMENT == 'production' and WEBHOOK_URL:
+            # Configurar webhook para produção
+            webhook_url_full = f"{WEBHOOK_URL}/webhook"
+            bot.remove_webhook()
+            bot.set_webhook(url=webhook_url_full)
+            logger.info(f"Webhook configurado: {webhook_url_full}")
+            
+            # Executar Flask
+            port = int(os.getenv('PORT', 8080))
+            app.run(host='0.0.0.0', port=port)
+        else:
+            # Modo de desenvolvimento com polling
+            logger.info("Iniciando bot em modo polling (desenvolvimento)")
+            bot.remove_webhook()
+            bot.infinity_polling(timeout=30, long_polling_timeout=30)
+            
+    except Exception as e:
+        logger.error(f"Erro ao iniciar bot: {e}")
+
+# Função de limpeza periódica (thread separada)
+def periodic_cleanup():
+    while True:
+        time.sleep(1800)  # 30 minutos
+        cleanup_old_sessions()
+
+# Iniciar bot
+if __name__ == "__main__":
+    logger.info("=== BarIA Bot v3.0 - Iniciando ===")
+    logger.info(f"Ambiente: {ENVIRONMENT}")
+    logger.info(f"Bot Token: {'✅ Configurado' if BOT_TOKEN else '❌ Não encontrado'}")
+    logger.info(f"Groq API: {'✅ Configurado' if GROK_API_KEY else '❌ Não encontrado'}")
+    logger.info(f"Webhook URL: {'✅ Configurado' if WEBHOOK_URL else '❌ Não encontrado'}")
+    
+    # Iniciar thread de limpeza
+    cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
+    cleanup_thread.start()
+    
+    # Executar bot
+    run_bot()
