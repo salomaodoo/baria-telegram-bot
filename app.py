@@ -648,7 +648,7 @@ if __name__ == "__main__":
         bot_thread.start()
         app.run(host='0.0.0.0', port=port, debug=True)
         bot.reply_to(message, "⚠️ A cirurgia bariátrica é indicada para pessoas a partir de 16 anos. Para menores, é necessário avaliação médica especializada.")
-        elif age > 65:
+    elif age > 65:
             age_warning = f"⚠️ <b>Atenção, {user_data.name}!</b>\n\nA cirurgia bariátrica após os 65 anos requer avaliação médica muito criteriosa. Recomendo consultar um cirurgião especialista para análise individual."
             bot.reply_to(message, age_warning)
         
